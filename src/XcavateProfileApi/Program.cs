@@ -35,7 +35,6 @@ builder.Services.AddSwaggerGen(c =>
 
     // Add Swagger filters
     c.OperationFilter<ExcludeSwaggerOperationFilter>();
-    c.OperationFilter<DisableSwaggerOperationFilter>();
 });
 
 // Configure PostgreSQL database

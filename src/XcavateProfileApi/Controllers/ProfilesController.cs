@@ -5,7 +5,6 @@ using XcavateProfile.Client;
 using XcavateProfileApi.Data;
 using XcavateProfileApi.Middleware;
 using XcavateProfileApi.Services;
-using XcavateProfileApi.Swagger;
 using XcavateProfileApiClient;
 
 namespace XcavateProfileApi.Controllers;
@@ -235,8 +234,6 @@ public class ProfilesController : ControllerBase
     }
 
     // POST: api/profiles/5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3W/image
-    // NOTE: This endpoint is excluded from Swagger due to issues with IFormFile model binding
-    [SwaggerExclude]
     [HttpPost("{ss58address}/image")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -244,7 +241,7 @@ public class ProfilesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<string>> UploadImageAsync(string ss58address, [FromForm] IFormFile image)
+    public async Task<ActionResult<string>> UploadImageAsync(string ss58address, IFormFile image)
     {
         // Verify authentication headers
         var address = Request.Headers["X-SS58-Address"].FirstOrDefault();

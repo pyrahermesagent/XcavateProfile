@@ -477,4 +477,19 @@ public class ProfileApiTests
     }
 
     #endregion
+
+    #region Swagger Test
+
+    [Test]
+    public async Task Swagger_Document_Is_GeneratedAsync()
+    {
+        var response = await _httpClient!.GetAsync("/swagger/v1/swagger.json");
+
+        Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.OK));
+
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.That(json, Does.Contain("\"openapi\""));
+    }
+
+    #endregion
 }
