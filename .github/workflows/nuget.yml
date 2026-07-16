@@ -1,0 +1,52 @@
+name: NuGet Publish
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  release:
+    types: [published]
+
+jobs:
+  publish-nuget:
+    name: Publish NuGet Package
+    runs-on: ubuntu-latest
+    environment: XcavateProfile
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Get package version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION=${{ github.event.release.tag_name }}
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          else
+            VERSION="1.0.${{ github.run_number }}"
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build package
+        run: |
+          dotnet pack src/XcavateProfileApiClient/XcavateProfileApiClient.csproj \
+            -c Release \
+            -p:PackageVersion=${{ steps.version.outputs.version }} \
+            -o ./nupkgs
+
+      - name: Push to NuGet
+        run: dotnet nuget push ./nupkgs/*.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+
+      - name: Upload package as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkgs/
+          retention-days: 7

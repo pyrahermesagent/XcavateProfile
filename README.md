@@ -1,0 +1,307 @@
+# XcavateProfile - Substrate/Polkadot Profile Management System
+
+A comprehensive system for Substrate/Polkadot profile registration and management, featuring:
+
+- **API Backend**: ASP.NET Core Web API with Entity Framework Core (PostgreSQL)
+- **Client SDK**: C# class library with Substrate.NET for Sr25519 signature verification
+- **Authentication**: Signature-based auth using Blake2 hashing (aligned with Substrate)
+- **Storage**: Hetzner Object Storage (S3-compatible) for profile pictures
+- **CI/CD**: Docker deployment to Hetzner servers + NuGet package publishing
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        XcavateProfileClient                 │
+│  - C# SDK with Substrate.NET API                            │
+│  - Sr25519 signature generation                             │
+│  - Blake2 hashing for body content                          │
+│  - X-* headers for authentication                           │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                             │ HTTP Requests (with auth headers)
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        XcavateProfileApi                    │
+│  - ASP.NET Core Web API (.NET 10)                          │
+│  - Profile CRUD endpoints                                   │
+│  - Authentication middleware (signature verification)       │
+│  - Image upload to S3 (Hetzner Object Storage)             │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                             │ EF Core ORM
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        PostgreSQL                            │
+│  - Profile data storage                                     │
+│  - SS58 address as primary key                             │
+│  - Unique nickname constraint                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/profiles` | List all profiles |
+| GET | `/api/profiles/{ss58address}` | Get profile by address |
+| GET | `/api/profiles/nickname/{nickname}` | Get profile by nickname |
+| POST | `/api/profiles` | Create profile (requires auth) |
+| PUT | `/api/profiles/{ss58address}` | Update profile (requires auth) |
+| DELETE | `/api/profiles/{ss58address}` | Delete profile (requires auth) |
+| POST | `/api/profiles/{ss58address}/image` | Upload profile image (requires auth) |
+
+## Authentication
+
+All state-changing requests (POST/PUT/DELETE) require Sr25519 signature verification:
+
+### Authentication Headers
+- `X-SS58-Address`: The Substrate SS58 address of the signer
+- `X-Signature`: Hex-encoded Sr25519 signature
+- `X-Timestamp`: ISO 8601 timestamp (replay attack prevention)
+
+### Signed Payload Format
+```
+<method>:<path>:<body_hash>:<timestamp>
+```
+
+Where `<body_hash>` is the Blake2 hash of the request body.
+
+### Signature Verification
+1. Server computes Blake2 hash of the request body
+2. Constructs the payload string with method, path, hash, and timestamp
+3. Verifies the signature using the public key from the profile
+4. Checks timestamp is within 5 minutes (replay attack prevention)
+5. Authorizes based on profile ownership or admin status
+
+## Running Locally
+
+### Prerequisites
+- .NET 10.0 SDK
+- Docker & Docker Compose
+- PostgreSQL (or use Docker)
+
+### Setup
+
+1. **Clone the repository**
+```bash
+git clone <repository-url>
+cd XcavateProfile
+```
+
+2. **Copy environment template**
+```bash
+cp .env.example .env
+```
+
+3. **Configure environment variables**
+Edit `.env` with your settings:
+```env
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=xcavate_profile
+POSTGRES_USER=xcavate_user
+POSTGRES_PASSWORD=your_secure_password
+ASPNETCORE_ENVIRONMENT=Development
+ASPNETCORE_URLS=http://localhost:5000
+S3_ENDPOINT=https://fsn1.your-storagebox.de
+S3_REGION=fsn1
+S3_ACCESS_KEY=your-access-key
+S3_SECRET_KEY=your-secret-key
+ADMIN_ADDRESSES=5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3W
+```
+
+4. **Start the stack with Docker**
+```bash
+docker-compose up -d
+```
+
+5. **Run database migrations**
+```bash
+dotnet ef database update --project src/XcavateProfileApi --context ProfileDbContext
+```
+
+6. **Run the API**
+```bash
+dotnet run --project src/XcavateProfileApi
+```
+
+7. **Access Swagger UI**
+- Navigate to `http://localhost:5000/swagger`
+
+## Using the C# Client SDK
+
+### Installation
+
+```bash
+dotnet add package XcavateProfileApiClient
+```
+
+### Basic Usage
+
+```csharp
+using XcavateProfileApiClient;
+using Substrate.NET.API;
+
+// Generate a keypair
+var keypair = new KeyPair();
+var secretKey = keypair.PrivateKey;
+var address = keypair.Address;
+
+// Create client
+var client = new XcavateProfileApiClient(new XcavateProfileApiClientOptions
+{
+    ApiUrl = "http://localhost:5000",
+    SecretKey = secretKey,
+    SS58Address = address
+});
+
+// Create a profile
+var profile = new Profile
+{
+    Ss58Address = address,
+    Nickname = "myprofile",
+    Bio = "My Substrate profile"
+};
+
+await client.CreateProfileAsync(profile, secretKey);
+
+// Get the profile
+var retrieved = await client.GetProfileAsync(address);
+
+// Update the profile
+profile.Bio = "Updated bio";
+await client.UpdateProfileAsync(address, profile, secretKey);
+
+// Upload an image
+using (var imageStream = File.OpenRead("profile.jpg"))
+{
+    var imageUrl = await client.UploadImageAsync(address, imageStream, "profile.jpg", secretKey);
+}
+
+// Delete the profile
+await client.DeleteProfileAsync(address, secretKey);
+```
+
+### Manual Signature Construction (Advanced)
+
+```csharp
+using XcavateProfileApiClient;
+using Substrate.NET.API;
+
+// Construct payload manually
+var timestamp = DateTime.UtcNow;
+var payload = CryptoHelper.ConstructPayload(
+    "POST", 
+    "/api/profiles", 
+    CryptoHelper.ComputeBlake2bHash(bodyJson), 
+    timestamp);
+
+// Sign the payload using Account
+var (signature, signedAddress) = CryptoHelper.SignPayload(payload, account);
+
+// Use signature in request headers
+httpClient.DefaultRequestHeaders.Add("X-SS58-Address", signedAddress);
+httpClient.DefaultRequestHeaders.Add("X-Signature", signature);
+httpClient.DefaultRequestHeaders.Add("X-Timestamp", timestamp.ToString("o"));
+```
+
+## CI/CD Deployment
+
+### Deployment Pipeline
+
+1. **Build Docker Image** (GitHub Actions)
+   - Multi-stage Docker build
+   - Push to GitHub Container Registry (ghcr.io)
+
+2. **Deploy to Hetzner** (GitHub Actions)
+   - SSH to Hetzner server
+   - Update repository
+   - Generate `.env` from GitHub secrets
+   - Run Docker Compose
+   - Execute database migrations
+
+3. **NuGet Publishing** (GitHub Actions)
+   - Build and pack the client SDK
+   - Publish to NuGet.org
+   - Versioning: `1.0.<run_number>` for develop, git tags for releases
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `HETZNER_HOST` | Hetzner server IP/hostname |
+| `HETZNER_USER` | SSH username |
+| `HETZNER_SSH_KEY` | SSH private key |
+| `HETZNER_DEPLOY_DIR` | Remote deployment directory |
+| `HETZNER_POSTGRES_HOST` | PostgreSQL connection info |
+| `HETZNER_S3_ENDPOINT` | Hetzner S3 endpoint |
+| `NUGET_API_KEY` | NuGet API key |
+
+## Admin Authentication
+
+Admin addresses are configured via the `ADMIN_ADDRESSES` environment variable. Admins can:
+
+- Update any profile
+- Delete any profile
+- Bypass profile ownership checks
+
+**Format**: Comma-separated list of SS58 addresses
+```
+ADMIN_ADDRESSES=5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3W,5DZ1xN32y6fV5bQ8j7K4m5L6n7M8o9P0q1R2s3T4u5V6
+```
+
+## Data Model
+
+### Profile Entity
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ss58address` | string (PK) | Substrate SS58 address (required) |
+| `nickname` | string | Unique nickname (optional) |
+| `bio` | string | Profile description (optional) |
+| `profilePicture` | string | URL to profile picture (optional) |
+| `x25519Key` | string | x25519 public key (optional) |
+
+## Security Features
+
+- **Signature Verification**: Sr25519 signatures verified on every state-changing request
+- **Replay Attack Prevention**: Timestamp validation (5-minute window)
+- **Authorization Checks**: Users can only modify their own profiles (unless admin)
+- **Admin Override**: Environment-based admin list (not stored in database)
+- **Hash Integrity**: Blake2 hashing for body content (Substrate-compatible)
+
+## Troubleshooting
+
+### Database Connection Issues
+- Ensure PostgreSQL is running: `docker-compose ps`
+- Check connection string in `.env`
+- Verify network connectivity between containers
+
+### Signature Verification Failures
+- Verify timestamp is within 5 minutes of server time
+- Ensure `X-SS58-Address`, `X-Signature`, and `X-Timestamp` headers are present
+- Check signature was created with correct secret key
+
+### Hetzner S3 Upload Issues
+- Verify `S3_ENDPOINT`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` in `.env`
+- Ensure bucket exists and credentials have write permissions
+- Check firewall allows outbound connections to S3 endpoint
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License.
+
+## Acknowledgments
+
+- Built with [Substrate.NET.API](https://github.com/paritytech/parity-substrate-dotnet) for cryptographic operations
+- Uses Entity Framework Core for data persistence
+- Deployed on Hetzner Cloud infrastructure

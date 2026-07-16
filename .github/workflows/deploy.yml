@@ -1,0 +1,115 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  release:
+    types: [published]
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    environment: XcavateProfile
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repository owner
+        id: owner
+        # This guarantees it uses the repository namespace (e.g., pyrahermesagent)
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.owner }}/xcavate-profile:latest
+            ghcr.io/${{ steps.owner.outputs.owner }}/xcavate-profile:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get current timestamp
+        id: timestamp
+        run: echo "timestamp=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          port: ${{ secrets.HETZNER_PORT || 22 }}
+          script: |
+            set -e
+            
+            # 1. Create the deployment directory if it doesn't exist
+            mkdir -p ${{ secrets.HETZNER_DEPLOY_DIR }}
+            cd ${{ secrets.HETZNER_DEPLOY_DIR }}
+            
+            # 2. Initialize Git if it's not a repository yet
+            if [ ! -d ".git" ]; then
+              git init
+              git remote add origin https://github.com/${{ github.repository }}.git
+            fi
+            
+            # 3. Fetch latest code and force reset (prevents merge conflicts and handles new repos)
+            git fetch origin
+            git reset --hard origin/${{ github.ref_name }}
+            
+            # Create .env file
+            cat > .env << 'EOF'
+            POSTGRES_HOST=${{ secrets.HETZNER_POSTGRES_HOST }}
+            POSTGRES_PORT=${{ secrets.HETZNER_POSTGRES_PORT }}
+            POSTGRES_DB=${{ secrets.HETZNER_POSTGRES_DB }}
+            POSTGRES_USER=${{ secrets.HETZNER_POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.HETZNER_POSTGRES_PASSWORD }}
+            ASPNETCORE_ENVIRONMENT=Production
+            ASPNETCORE_URLS=http://+:5000
+            S3_ENDPOINT=${{ secrets.HETZNER_S3_ENDPOINT }}
+            S3_REGION=${{ secrets.HETZNER_S3_REGION }}
+            S3_ACCESS_KEY=${{ secrets.HETZNER_S3_ACCESS_KEY }}
+            S3_SECRET_KEY=${{ secrets.HETZNER_S3_SECRET_KEY }}
+            ADMIN_ADDRESSES=${{ secrets.HETZNER_ADMIN_ADDRESSES }}
+            EOF
+            
+            docker compose down
+            docker compose build --no-cache
+            docker compose up -d
+            # Wait a few seconds to let it crash if it's going to
+            sleep 5
+            
+            # Print the API container logs to GitHub Actions
+            echo "=== API CONTAINER LOGS ==="
+            docker logs xcavate-api
+            echo "=========================="
+            
+            curl -f http://localhost:5000/health && echo "Deployment verified!"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          port: ${{ secrets.HETZNER_PORT || 22 }}
+          script: |
+            curl -f http://localhost:5000/health && echo "Deployment verified!"
