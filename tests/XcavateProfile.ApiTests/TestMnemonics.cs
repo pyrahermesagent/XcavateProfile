@@ -79,4 +79,14 @@ public static class TestMnemonics
     /// Valid image3 mnemonic
     /// </summary>
     public static readonly string Image3Mnemonic = FromEntropy(0x0C);
+
+    /// <summary>
+    /// Valid image4 mnemonic
+    /// </summary>
+    public static readonly string Image4Mnemonic = FromEntropy(0x0D);
+
+    /// <summary>
+    /// Valid image5 mnemonic
+    /// </summary>
+    public static readonly string Image5Mnemonic = FromEntropy(0x0E);
 }

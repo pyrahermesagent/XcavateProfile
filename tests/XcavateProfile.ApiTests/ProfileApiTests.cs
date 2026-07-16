@@ -515,6 +515,79 @@ public class ProfileApiTests
     }
 
     [Test]
+    public async Task Upload_Same_Filename_Twice_Overwrites_Existing_ImageAsync()
+    {
+        // Arrange
+        var mnemonic = TestMnemonics.Image4Mnemonic;
+        var account = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
+        var address = account.Value;
+        var x25519Key = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+        var client = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+        await EnsureNoProfileAsync(client, account);
+
+        var profile = new Profile { Ss58Address = address, Nickname = "overwriteuser", X25519Key = x25519Key };
+        await client.CreateProfileAsync(profile, account);
+
+        // Act - upload two different images under the same filename
+        var firstStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("first image content"));
+        var firstUrl = await client.UploadImageAsync(address, firstStream, "overwrite.jpg", account);
+
+        var secondStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("second image content"));
+        var secondUrl = await client.UploadImageAsync(address, secondStream, "overwrite.jpg", account);
+
+        // Assert - same filename maps to the same object, so the second upload
+        // rewrites the first instead of creating a new one
+        Assert.That(firstUrl, Does.Contain("overwrite.jpg"));
+        Assert.That(secondUrl, Is.EqualTo(firstUrl));
+    }
+
+    [Test]
+    public async Task Upload_NonImage_File_Is_RejectedAsync()
+    {
+        // Arrange - the bucket serves objects publicly, so storing an HTML file
+        // with a text/html content type would enable stored XSS / phishing.
+        // The server must reject anything that is not a known image type.
+        var mnemonic = TestMnemonics.Image5Mnemonic;
+        var account = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
+        var address = account.Value;
+        var x25519Key = "0xabababababababababababababababababababababababababababababababab";
+
+        var client = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+        await EnsureNoProfileAsync(client, account);
+
+        var profile = new Profile { Ss58Address = address, Nickname = "evilfileuser", X25519Key = x25519Key };
+        await client.CreateProfileAsync(profile, account);
+
+        var timestamp = DateTime.UtcNow;
+        var payload = CryptoHelper.ConstructPayload("POST", $"/api/profiles/{address}/image", new EmptyPayloadBody(), timestamp);
+        var signature = await CryptoHelper.SignAsync(payload, account);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"api/profiles/{address}/image");
+        request.Headers.Add("X-SS58-Address", address);
+        request.Headers.Add("X-Signature", Utils.Bytes2HexString(signature));
+        request.Headers.Add("X-Timestamp", timestamp.ToUniversalTime().ToString("o"));
+
+        var htmlPart = new StreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("<script>alert(1)</script>")));
+        htmlPart.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/html");
+        var content = new MultipartFormDataContent();
+        content.Add(htmlPart, "image", "evil.html");
+        request.Content = content;
+
+        // Act
+        var response = await _httpClient!.SendAsync(request);
+
+        // Assert
+        Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.BadRequest));
+    }
+
+    [Test]
     public async Task Upload_Large_Profile_Image_25MB_SuccessAsync()
     {
         // Arrange
