@@ -193,7 +193,15 @@ public class XcavateProfileClient : IDisposable
         response.EnsureSuccessStatusCode();
 
         var responseContent = await response.Content.ReadAsStringAsync();
-        return JsonSerializer.Deserialize<string>(responseContent, _jsonOptions) ?? "";
+
+        // ASP.NET Core serves bare strings as text/plain; only parse JSON when the
+        // server actually sent JSON
+        if (response.Content.Headers.ContentType?.MediaType == "application/json")
+        {
+            return JsonSerializer.Deserialize<string>(responseContent, _jsonOptions) ?? "";
+        }
+
+        return responseContent;
     }
 
     public void Dispose()

@@ -156,7 +156,7 @@ public class ProfilesController : ControllerBase
         // Check authorization: can only update own profile or is admin
         if (address != ss58address && !_signatureValidator.IsAdmin(address))
         {
-            return Forbid("You can only update your own profile");
+            return StatusCode(StatusCodes.Status403Forbidden, "You can only update your own profile");
         }
 
         // Check if profile exists
@@ -219,7 +219,7 @@ public class ProfilesController : ControllerBase
         // Check authorization: only admin or profile owner can delete
         if (address != ss58address && !_signatureValidator.IsAdmin(address))
         {
-            return Forbid("You can only delete your own profile");
+            return StatusCode(StatusCodes.Status403Forbidden, "You can only delete your own profile");
         }
 
         var profile = await _context.Profiles.FindAsync(ss58address);
@@ -278,7 +278,7 @@ public class ProfilesController : ControllerBase
         // Check authorization: can only upload image for own profile or is admin
         if (address != ss58address && !_signatureValidator.IsAdmin(address))
         {
-            return Forbid("You can only upload image for your own profile");
+            return StatusCode(StatusCodes.Status403Forbidden, "You can only upload image for your own profile");
         }
 
         // Check if profile exists
@@ -294,7 +294,7 @@ public class ProfilesController : ControllerBase
             using (var stream = image.OpenReadStream())
             {
                 var key = $"profiles/{ss58address}/{Guid.NewGuid()}_{image.FileName}";
-                var url = await _s3Service.UploadImageAsync("xcavate-profiles", key, stream, image.ContentType);
+                var url = await _s3Service.UploadImageAsync("xcavate-profile", key, stream, image.ContentType);
 
                 // Update profile picture URL
                 profile.ProfilePicture = url;

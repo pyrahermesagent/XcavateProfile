@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Substrate.NetApi;
+using Substrate.NetApi.Model.Types;
 using System;
 using System.IO;
 using System.Net.Http;
@@ -13,9 +14,9 @@ namespace XcavateProfile.ApiTests;
 public class ProfileApiTests
 {
     private string mnemonic = TestMnemonics.BaseMnemonic;
-    // Valid BIP39 mnemonic that produces a different account (for invalid signature tests)
-    // Using admin mnemonic which has valid checksum but different from base
-    private string invalidMnemonic = TestMnemonics.AdminMnemonic;
+    // Valid BIP39 mnemonic that produces a different, non-admin account
+    // (for invalid signature / unauthorized access tests)
+    private string invalidMnemonic = TestMnemonics.User3Mnemonic;
 
     // Address must match the account derived from BaseMnemonic, or the server
     // rejects with "Can only create profile for authenticated address"
@@ -46,6 +47,23 @@ public class ProfileApiTests
         _httpClient?.Dispose();
     }
 
+    /// <summary>
+    /// The API uses a persistent database, so a profile created by a previous
+    /// test (or a previous test run) survives. Delete the account's own profile
+    /// if it exists so every test starts from a clean state.
+    /// </summary>
+    private static async Task EnsureNoProfileAsync(XcavateProfileClient client, Account account)
+    {
+        try
+        {
+            await client.DeleteProfileAsync(account.Value, account);
+        }
+        catch (HttpRequestException)
+        {
+            // 404 - no profile existed, nothing to clean up
+        }
+    }
+
     #region Profile CRUD Tests
 
     [Test]
@@ -64,6 +82,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(_client, account);
 
         // Act
         var result = await _client.CreateProfileAsync(profile, account);
@@ -83,6 +102,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(_client, account);
 
         var profile = new Profile
         {
@@ -109,6 +129,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(_client, account);
 
         var profile = new Profile
         {
@@ -134,21 +155,16 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(_client, account);
 
-        try
+        // Create profile first
+        var profile = new Profile
         {
-            // Create profile first
-            var profile = new Profile
-            {
-                Ss58Address = address,
-                Nickname = "original",
-                X25519Key = x25519Key
-            };
-            await _client.CreateProfileAsync(profile, account);
-        }
-        catch
-        {
-        }
+            Ss58Address = address,
+            Nickname = "original",
+            X25519Key = x25519Key
+        };
+        await _client.CreateProfileAsync(profile, account);
 
         // Update the profile
         var updateProfile = new Profile
@@ -176,6 +192,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(_client, account);
 
         // Create profile first
         var profile = new Profile
@@ -209,6 +226,8 @@ public class ProfileApiTests
             X25519Key = x25519Key
         };
 
+        // The signing account does not match the profile's address, so the
+        // server must reject the request as unauthorized
         var invalidAccount = MnemonicsModel.GetAccountFromMnemonics(invalidMnemonic);
 
         _client = new XcavateProfileClient(new XcavateProfileClientOptions
@@ -259,31 +278,29 @@ public class ProfileApiTests
     [Test]
     public async Task Update_AnotherUserProfile_FailsAsync()
     {
-        // Arrange
-        var user2Key = "0x8674d0e2bbf1d6a6c2c6b6d2e1c2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f6";
-        var user2Address = "5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3C";
-
+        // Arrange - user1 creates a profile
         var account = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
         var client1 = new XcavateProfileClient(new XcavateProfileClientOptions
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(client1, account);
 
-        // Create user1's profile
         var profile1 = new Profile { Ss58Address = address, Nickname = "user1", X25519Key = x25519Key };
         await client1.CreateProfileAsync(profile1, account);
 
-        var invalidAccount = MnemonicsModel.GetAccountFromMnemonics(invalidMnemonic);
+        // A different, non-admin account tries to update user1's profile
+        var attackerAccount = MnemonicsModel.GetAccountFromMnemonics(invalidMnemonic);
 
         var client2 = new XcavateProfileClient(new XcavateProfileClientOptions
         {
             ApiUrl = TestApiUrl
         });
 
-        var updateProfile = new Profile { Ss58Address = invalidAccount.Value, Nickname = "hacked", X25519Key = x25519Key2 };
+        var updateProfile = new Profile { Ss58Address = address, Nickname = "hacked", X25519Key = x25519Key2 };
 
         // Act & Assert
-        var ex = Assert.ThrowsAsync<HttpRequestException>(() => client2.UpdateProfileAsync(invalidAccount.Value, updateProfile, invalidAccount));
+        var ex = Assert.ThrowsAsync<HttpRequestException>(() => client2.UpdateProfileAsync(address, updateProfile, attackerAccount));
         Assert.That(ex?.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.Forbidden));
     }
 
@@ -298,6 +315,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(user1Client, user1Account);
 
         var profile1 = new Profile { Ss58Address = user1Address, Nickname = "user1delete", X25519Key = x25519Key };
         await user1Client.CreateProfileAsync(profile1, user1Account);
@@ -330,6 +348,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(adminClient, adminAccount);
 
         var adminProfile = new Profile { Ss58Address = adminAddress, Nickname = "admin", X25519Key = x25519Key };
         await adminClient.CreateProfileAsync(adminProfile, adminAccount);
@@ -341,6 +360,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(userClient, userAccount);
 
         var userProfile = new Profile { Ss58Address = userAddress, Nickname = "regularuser", X25519Key = x25519Key };
         await userClient.CreateProfileAsync(userProfile, userAccount);
@@ -359,28 +379,25 @@ public class ProfileApiTests
     [Test]
     public async Task Admin_Can_Delete_OtherUserProfileAsync()
     {
-        // Similar setup to admin update test
-        var adminAccount = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
-        var adminAddress = adminAccount.Value;
-        var adminClient = new XcavateProfileClient(new XcavateProfileClientOptions
-        {
-            ApiUrl = TestApiUrl
-        });
-
-        var adminProfile = new Profile { Ss58Address = adminAddress, Nickname = "admin2", X25519Key = x25519Key };
-        await adminClient.CreateProfileAsync(adminProfile, adminAccount);
-
-        var userAccount = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
+        // Arrange - a regular user creates a profile
+        var userAccount = MnemonicsModel.GetAccountFromMnemonics(TestMnemonics.User4Mnemonic);
         var userAddress = userAccount.Value;
         var userClient = new XcavateProfileClient(new XcavateProfileClientOptions
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(userClient, userAccount);
 
         var userProfile = new Profile { Ss58Address = userAddress, Nickname = "regularuser2", X25519Key = x25519Key };
         await userClient.CreateProfileAsync(userProfile, userAccount);
 
         // Admin deletes regular user's profile
+        var adminAccount = MnemonicsModel.GetAccountFromMnemonics(TestMnemonics.AdminMnemonic);
+        var adminClient = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+
         // Act
         await adminClient.DeleteProfileAsync(userAddress, adminAccount);
 
@@ -403,6 +420,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(client1, user1Account);
 
         var profile1 = new Profile { Ss58Address = address1, Nickname = "uniqueNick", X25519Key = x25519Key };
         await client1.CreateProfileAsync(profile1, user1Account);
@@ -414,8 +432,10 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(client2, user2Account);
 
-        var profile2 = new Profile { Ss58Address = "5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3K", Nickname = "uniqueNick", X25519Key = x25519Key };
+        // user2 tries to register the nickname user1 already owns
+        var profile2 = new Profile { Ss58Address = user2Account.Value, Nickname = "uniqueNick", X25519Key = x25519Key };
 
         // Assert
         var ex = Assert.ThrowsAsync<HttpRequestException>(() => client2.CreateProfileAsync(profile2, user2Account));
@@ -439,6 +459,7 @@ public class ProfileApiTests
         {
             ApiUrl = TestApiUrl
         });
+        await EnsureNoProfileAsync(client, account);
 
         var profile = new Profile { Ss58Address = address, Nickname = "imageuser", X25519Key = x25519Key };
         await client.CreateProfileAsync(profile, account);
