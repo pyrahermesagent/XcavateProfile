@@ -179,7 +179,9 @@ public class XcavateProfileClient : IDisposable
 
         // Create the request content
         var content = new MultipartFormDataContent();
-        content.Add(new StreamContent(imageStream), "image", filename);
+        var imageContent = new StreamContent(imageStream);
+        imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(GetImageContentType(filename));
+        content.Add(imageContent, "image", filename);
 
         // Add authentication headers properly
         _httpClient.DefaultRequestHeaders.Clear();
@@ -202,6 +204,20 @@ public class XcavateProfileClient : IDisposable
         }
 
         return responseContent;
+    }
+
+    private static string GetImageContentType(string filename)
+    {
+        return Path.GetExtension(filename).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "application/octet-stream"
+        };
     }
 
     public void Dispose()

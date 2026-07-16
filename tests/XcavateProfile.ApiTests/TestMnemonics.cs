@@ -74,4 +74,9 @@ public static class TestMnemonics
     /// Valid mnemonic for zero
     /// </summary>
     public static readonly string ZeroMnemonic = FromEntropy(0x0B);
+
+    /// <summary>
+    /// Valid image3 mnemonic
+    /// </summary>
+    public static readonly string Image3Mnemonic = FromEntropy(0x0C);
 }

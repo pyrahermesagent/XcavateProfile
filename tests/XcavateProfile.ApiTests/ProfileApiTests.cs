@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using XcavateProfile.Client;
+using XcavateProfileApiClient;
 
 namespace XcavateProfile.ApiTests;
 
@@ -540,6 +541,48 @@ public class ProfileApiTests
         // Assert
         Assert.That(imageUrl, Is.Not.Null);
         Assert.That(imageUrl!.Contains("large.jpg"), Is.True);
+    }
+
+    [Test]
+    public async Task Upload_Profile_Image_Without_ContentType_SuccessAsync()
+    {
+        // Arrange - some clients omit the Content-Type header on the multipart file
+        // part; the server must fall back to a sensible type instead of failing
+        var mnemonic = TestMnemonics.Image3Mnemonic;
+        var account = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
+        var uploadAddress = account.Value;
+        var x25519Key = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+        var client = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+        await EnsureNoProfileAsync(client, account);
+
+        var profile = new Profile { Ss58Address = uploadAddress, Nickname = "noctypeuser", X25519Key = x25519Key };
+        await client.CreateProfileAsync(profile, account);
+
+        // Build the multipart request by hand so the file part has NO Content-Type
+        var timestamp = DateTime.UtcNow;
+        var payload = CryptoHelper.ConstructPayload("POST", $"/api/profiles/{uploadAddress}/image", new EmptyPayloadBody(), timestamp);
+        var signature = await CryptoHelper.SignAsync(payload, account);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"api/profiles/{uploadAddress}/image");
+        request.Headers.Add("X-SS58-Address", uploadAddress);
+        request.Headers.Add("X-Signature", Utils.Bytes2HexString(signature));
+        request.Headers.Add("X-Timestamp", timestamp.ToUniversalTime().ToString("o"));
+
+        var content = new MultipartFormDataContent();
+        content.Add(new StreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("fake image content"))), "image", "noctype.jpg");
+        request.Content = content;
+
+        // Act
+        var response = await _httpClient!.SendAsync(request);
+
+        // Assert
+        Assert.That(response.IsSuccessStatusCode, Is.True, $"Expected success but got {(int)response.StatusCode}");
+        var imageUrl = await response.Content.ReadAsStringAsync();
+        Assert.That(imageUrl, Does.Contain("noctype.jpg"));
     }
 
     #endregion

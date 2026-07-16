@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Substrate.NetApi;
 using XcavateProfile.Client;
@@ -313,7 +314,17 @@ public class ProfilesController : ControllerBase
             using (var stream = image.OpenReadStream())
             {
                 var key = $"profiles/{ss58address}/{Guid.NewGuid()}_{image.FileName}";
-                var url = await _s3Service.UploadImageAsync("xcavate-profile", key, stream, image.ContentType);
+                // Clients may omit the Content-Type on the multipart file part; an empty
+                // value makes the S3 SDK throw when writing request headers.
+                var contentType = image.ContentType;
+                if (string.IsNullOrWhiteSpace(contentType))
+                {
+                    if (!new FileExtensionContentTypeProvider().TryGetContentType(image.FileName, out contentType))
+                    {
+                        contentType = "application/octet-stream";
+                    }
+                }
+                var url = await _s3Service.UploadImageAsync("xcavate-profile", key, stream, contentType);
 
                 // Update profile picture URL
                 profile.ProfilePicture = url;
