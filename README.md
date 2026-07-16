@@ -226,6 +226,20 @@ httpClient.DefaultRequestHeaders.Add("X-Timestamp", timestamp.ToString("o"));
    - Publish to NuGet.org
    - Versioning: `1.0.<run_number>` for develop, git tags for releases
 
+### Reverse Proxy Configuration
+
+The image upload endpoint accepts images up to 25MB (26MB request limit including
+multipart overhead). Any reverse proxy in front of the API must allow at least the
+same request body size, or uploads fail with `413 Request Entity Too Large` before
+reaching the API. For nginx (default limit is 1MB):
+
+```nginx
+# in the server/location block proxying to the API
+client_max_body_size 26m;
+```
+
+Then reload: `nginx -t && systemctl reload nginx`
+
 ### Required GitHub Secrets
 
 | Secret | Description |

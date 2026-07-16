@@ -234,7 +234,13 @@ public class ProfilesController : ControllerBase
     }
 
     // POST: api/profiles/5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3W/image
+    // Images up to 25MB are supported; the extra 1MB covers multipart encoding overhead.
+    // NOTE: any reverse proxy in front of the API (e.g. nginx client_max_body_size)
+    // must allow at least the same request size, or uploads fail with 413 before
+    // ever reaching this endpoint.
     [HttpPost("{ss58address}/image")]
+    [RequestSizeLimit(26 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 26 * 1024 * 1024)]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

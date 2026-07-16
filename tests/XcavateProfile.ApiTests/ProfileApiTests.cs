@@ -476,6 +476,35 @@ public class ProfileApiTests
         Assert.That(imageUrl!.Contains("test.jpg"), Is.True);
     }
 
+    [Test]
+    public async Task Upload_Large_Profile_Image_25MB_SuccessAsync()
+    {
+        // Arrange
+        var mnemonic = TestMnemonics.ImageMnemonic;
+        var account = MnemonicsModel.GetAccountFromMnemonics(mnemonic);
+        var address = account.Value;
+        var x25519Key = "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+        var client = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+        await EnsureNoProfileAsync(client, account);
+
+        var profile = new Profile { Ss58Address = address, Nickname = "largeimageuser", X25519Key = x25519Key };
+        await client.CreateProfileAsync(profile, account);
+
+        // Images up to 25MB must be accepted
+        var imageStream = new MemoryStream(new byte[25 * 1024 * 1024]);
+
+        // Act
+        var imageUrl = await client.UploadImageAsync(address, imageStream, "large.jpg", account);
+
+        // Assert
+        Assert.That(imageUrl, Is.Not.Null);
+        Assert.That(imageUrl!.Contains("large.jpg"), Is.True);
+    }
+
     #endregion
 
     #region Swagger Test
