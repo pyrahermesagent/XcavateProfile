@@ -211,6 +211,43 @@ public class ProfileApiTests
         Assert.That(result, Is.Null);
     }
 
+    [Test]
+    public async Task Update_NonExistent_Profile_Creates_ItAsync()
+    {
+        // Arrange - an account with no existing profile
+        var account = MnemonicsModel.GetAccountFromMnemonics(TestMnemonics.ZeroMnemonic);
+        var address = account.Value;
+        var x25519Key = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+        var client = new XcavateProfileClient(new XcavateProfileClientOptions
+        {
+            ApiUrl = TestApiUrl
+        });
+        await EnsureNoProfileAsync(client, account);
+
+        var profile = new Profile
+        {
+            Ss58Address = address,
+            Nickname = "upsertuser",
+            Bio = "Created via PUT",
+            X25519Key = x25519Key
+        };
+
+        // Act - PUT without a prior POST must create the profile
+        var result = await client.UpdateProfileAsync(address, profile, account);
+
+        // Assert
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.Ss58Address, Is.EqualTo(address));
+        Assert.That(result.Nickname, Is.EqualTo("upsertuser"));
+        Assert.That(result.Bio, Is.EqualTo("Created via PUT"));
+
+        // The profile must actually be persisted
+        var fetched = await client.GetProfileAsync(address);
+        Assert.That(fetched, Is.Not.Null);
+        Assert.That(fetched!.Nickname, Is.EqualTo("upsertuser"));
+    }
+
     #endregion
 
     #region Authentication Tests

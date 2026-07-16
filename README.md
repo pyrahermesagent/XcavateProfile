@@ -47,7 +47,7 @@ A comprehensive system for Substrate/Polkadot profile registration and managemen
 | GET | `/api/profiles/{ss58address}` | Get profile by address |
 | GET | `/api/profiles/nickname/{nickname}` | Get profile by nickname |
 | POST | `/api/profiles` | Create profile (requires auth) |
-| PUT | `/api/profiles/{ss58address}` | Update profile (requires auth) |
+| PUT | `/api/profiles/{ss58address}` | Update profile, or create it if it does not exist yet (requires auth) |
 | DELETE | `/api/profiles/{ss58address}` | Delete profile (requires auth) |
 | POST | `/api/profiles/{ss58address}/image` | Upload profile image (requires auth) |
 

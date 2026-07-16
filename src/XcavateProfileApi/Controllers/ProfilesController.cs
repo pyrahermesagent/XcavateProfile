@@ -121,8 +121,10 @@ public class ProfilesController : ControllerBase
     }
 
     // PUT: api/profiles/5GrwvaEF5zKbXCEe9qGjZL23Y641mot2Ff6hS3s8jF3g3k3W
+    // Upsert: creates the profile when it does not exist yet
     [HttpPut("{ss58address}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -158,20 +160,34 @@ public class ProfilesController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, "You can only update your own profile");
         }
 
-        // Check if profile exists
         var existingProfile = await _context.Profiles.FindAsync(ss58address);
-        if (existingProfile == null)
-        {
-            return NotFound();
-        }
 
-        // Check nickname uniqueness if nickname is being changed
-        if (!string.IsNullOrEmpty(profile.Nickname) && profile.Nickname != existingProfile.Nickname)
+        // Check nickname uniqueness if nickname is being set or changed
+        if (!string.IsNullOrEmpty(profile.Nickname) && profile.Nickname != existingProfile?.Nickname)
         {
             if (await _context.Profiles.AnyAsync(p => p.Nickname == profile.Nickname && p.Ss58Address != ss58address, CancellationToken.None))
             {
                 return BadRequest("Nickname already exists");
             }
+        }
+
+        // Create the profile when it does not exist yet (upsert)
+        if (existingProfile == null)
+        {
+            var newProfile = new Profile
+            {
+                // The route address is authoritative, same as the update path below
+                Ss58Address = ss58address,
+                Nickname = profile.Nickname,
+                Bio = profile.Bio,
+                ProfilePicture = profile.ProfilePicture,
+                X25519Key = profile.X25519Key
+            };
+
+            _context.Profiles.Add(newProfile);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetProfileAsync), new { ss58address = newProfile.Ss58Address }, newProfile);
         }
 
         // Update profile properties
